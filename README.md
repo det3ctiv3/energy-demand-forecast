@@ -1,6 +1,4 @@
-Below is a concise README file for your Uzbekistan Electricity Demand Forecast project. It provides an overview of the project, instructions for running the code, dependencies, data sources, and references to the source material. The README assumes that the code, data, and graphs are organized in a project directory.
-
-README: Uzbekistan Electricity Demand Forecast (2019–2035)
+Uzbekistan Electricity Demand Forecast (2019–2035)
 Project Overview
 This project forecasts Uzbekistan's electricity demand from 2019 to 2035 under three scenarios: Steady Growth, Sectoral Expansion, and Tariff Impact. The study was conducted using the Prophet forecasting framework to model long-term electricity demand based on historical data and external regressors such as GDP growth, sectoral consumption, and tariff impacts. The results align with external benchmarks and provide actionable insights for energy policy and infrastructure planning in Uzbekistan.
 
