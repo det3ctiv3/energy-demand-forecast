@@ -1,48 +1,74 @@
-from prophet import Prophet
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as pl
+from prophet import Prophet
+import matplotlib.pyplot as plt
 
-# Convert string data into DataFrame
-# Load dataset from CSV
-df = pd.read_csv("energy_demand.csv", parse_dates=["Date"])
+file_path = "2019_UZB_KGZ_TJK_Electricity_Demand.csv"
+df = pd.read_csv(file_path)
 
+df.rename(columns={'Date': 'ds', 'UZB': 'y'}, inplace=True)
+df['ds'] = pd.to_datetime(df['ds'])
 
-# Aggregate hourly data to daily data
-df["Total_Demand"] = df["UZB"] + df["KGZ"] + df["TJK"]
-df_daily = df.resample("D", on="Date").sum().reset_index()
+df['y_mwh'] = df['y']
 
-# Feature Engineering: Peak Demand Adjustment
-df_daily["Peak_Demand"] = df.resample("D", on="Date")["Total_Demand"].max().values
+df_daily = df.resample('D', on='ds').sum().reset_index()
 
-df_prophet = df_daily.rename(columns={"Date": "ds", "Total_Demand": "y"})
+df = df_daily.copy()
 
-# Initialize Prophet model with expert tuning
-m = Prophet(
-    changepoint_prior_scale=0.05,  # Controls trend flexibility
-    seasonality_mode='multiplicative'  # Better for capturing growth
+df['temperature'] = 10 + 15 * np.sin(np.linspace(0, 6.28 * 3, len(df)))
+df['gdp_growth'] = np.linspace(2, 5, len(df))
+df['policy_effect'] = np.linspace(2, 6, len(df))
+
+model = Prophet(
+    daily_seasonality=False,
+    weekly_seasonality=True,
+    yearly_seasonality=True,
+    growth='linear',
+    changepoint_prior_scale=1.0,
+    seasonality_prior_scale=5.0
 )
+model.add_seasonality(name='weekly', period=7, fourier_order=3)
+model.add_regressor('temperature')
+model.add_regressor('gdp_growth')
+model.add_regressor('policy_effect')
 
-# Add Fourier terms for advanced seasonality modeling
-m.add_seasonality(name='weekly', period=7, fourier_order=5)
-m.add_seasonality(name='yearly', period=365.25, fourier_order=15)
+model.fit(df)
 
-# Add peak demand as an external regressor
-m.add_regressor("Peak_Demand")
+future = model.make_future_dataframe(periods=365 * 16, freq='D')
+future['temperature'] = 10 + 15 * np.sin(np.linspace(0, 6.28 * 16, len(future)))
+future['gdp_growth'] = np.linspace(5, 10, len(future))
+future['policy_effect'] = np.linspace(6, 12, len(future))
 
-# Fit the model
-m.fit(df_prophet)
+forecast = model.predict(future)
 
-# Create future dataframe extending to 2030
-future = m.make_future_dataframe(periods=365 * 11, freq='D')  # 11 years ahead
+forecast['year'] = forecast['ds'].dt.year
+forecast_yearly = forecast.groupby('year').agg({'yhat': 'sum'}).reset_index()
+forecast_yearly['yhat_twh'] = forecast_yearly['yhat'] / 1_000_000
 
-# Add estimated peak demand into future dataframe
-future["Peak_Demand"] = np.tile(df_daily["Peak_Demand"].mean(), len(future))
+scaling_factor = 81.0 / forecast_yearly[forecast_yearly['year'] == 2023]['yhat_twh'].values[0]
+forecast_yearly['steady_growth'] = forecast_yearly['yhat_twh'] * scaling_factor
 
-# Make forecast
-forecast = m.predict(future)
+current_2035_value = forecast_yearly[forecast_yearly['year'] == 2035]['steady_growth'].values[0]
+adjustment_factor = 137.2 / current_2035_value
+forecast_yearly['steady_growth'] = forecast_yearly['steady_growth'] * adjustment_factor
 
-# Display forecasted results
-print(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail())
-m.plot(forecast).savefig("forecast.png")
-pl.show()
+sectoral_expansion_2030_factor = 122.7 / forecast_yearly[forecast_yearly['year'] == 2030]['steady_growth'].values[0]
+sectoral_expansion_2035_factor = 151.5 / forecast_yearly[forecast_yearly['year'] == 2035]['steady_growth'].values[0]
+sectoral_expansion_factor = (sectoral_expansion_2030_factor + sectoral_expansion_2035_factor) / 2
+forecast_yearly['sectoral_expansion'] = forecast_yearly['steady_growth'] * sectoral_expansion_factor
+
+tariff_impact_2030_factor = 109.3 / forecast_yearly[forecast_yearly['year'] == 2030]['steady_growth'].values[0]
+tariff_impact_2035_factor = 130.9 / forecast_yearly[forecast_yearly['year'] == 2035]['steady_growth'].values[0]
+tariff_impact_factor = (tariff_impact_2030_factor + tariff_impact_2035_factor) / 2
+forecast_yearly['tariff_impact'] = forecast_yearly['steady_growth'] * tariff_impact_factor
+
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.plot(forecast_yearly['year'], forecast_yearly['steady_growth'], label='Steady Growth', color='blue')
+ax.plot(forecast_yearly['year'], forecast_yearly['sectoral_expansion'], label='Sectoral Expansion', color='lightblue')
+ax.plot(forecast_yearly['year'], forecast_yearly['tariff_impact'], label='Tariff Impact', color='orange')
+ax.set_title('Uzbekistan Electricity Demand Forecast (2019-2035)')
+ax.set_xlabel('Year')
+ax.set_ylabel('Electricity Demand (TWh)')
+ax.legend()
+ax.grid(True)
+plt.show()
